@@ -114,9 +114,7 @@ class SpCLRunner(BaseRunner):
 def parge_config():
     parser = argparse.ArgumentParser(description="SpCL training")
     parser.add_argument("config", help="train config file path")
-    parser.add_argument(
-        "--work-dir", help="the dir to save logs and models", default=""
-    )
+    parser.add_argument("--config", help="train config file path", default="config.yaml")
     parser.add_argument("--resume-from", help="the checkpoint file to resume from")
     parser.add_argument(
         "--launcher",
