@@ -218,7 +218,7 @@ class ReIDBaseModel(nn.Module):
         results = {}
 
         x = self.backbone_head(x)
-        x = icmif(x)
+        x = self.icmif(x)
 
         out = self.global_pooling(x)
         out = out.view(batch_size, -1)
