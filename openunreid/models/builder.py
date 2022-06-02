@@ -1,4 +1,4 @@
-# Written by Yixiao Ge
+from einops import rearrange, repeat
 
 import copy
 import warnings
@@ -15,6 +15,120 @@ from .utils.dsbn_utils import convert_dsbn
 
 __all__ = ["ReIDBaseModel", "TeacherStudentNetwork",
             "build_model", "build_gan_model"]
+
+class LAttention(nn.Module):
+    def __init__(self, dim, heads):
+        super().__init__()
+        self.heads = heads
+        self.Nh   =  heads
+        self.dk  =  dim
+        self.dv  =  dim
+        self.scale = dim ** -0.5
+        self.to_q = nn.Linear(dim, dim, bias=False)
+        self.to_k = nn.Linear(dim, dim, bias=False)
+        self.to_v = nn.Linear(dim, dim, bias=False)
+        self.to_q.apply(weights_init_classifier)
+        self.to_k.apply(weights_init_classifier)
+        self.to_v.apply(weights_init_classifier)
+    def forward(self, x,mask = None):
+        q = self.to_q(x)
+        k = self.to_k(x)
+        v = self.to_v(x)
+        q = rearrange(q, 'b s n (h d) -> b s h n d', h=self.heads)
+        k = rearrange(k, 'b s n (h d) -> b s h n d', h=self.heads)
+        v = rearrange(v, 'b s n (h d) -> b s h n d', h=self.heads)
+        dots = torch.einsum('bshid,bshjd->bshij', q, k) * self.scale
+        attn = dots.softmax(dim=-1)
+        out = torch.einsum('bshij,bshjd->bshid', attn, v)
+        out = rearrange(out, 'b s h n d -> b s n (h d)')
+        return out
+
+
+class GAttention(nn.Module):
+    def __init__(self, dim, heads):
+        super().__init__()
+        self.heads = heads
+        self.Nh   =  heads
+        self.dk  =  dim
+        self.dv  =  dim
+        self.scale = dim ** -0.5
+        self.to_q = nn.Linear(dim, dim, bias=False)
+        self.to_k = nn.Linear(dim, dim, bias=False)
+        self.to_v = nn.Linear(dim, dim, bias=False)
+        self.to_q.apply(weights_init_classifier)
+        self.to_k.apply(weights_init_classifier)
+        self.to_v.apply(weights_init_classifier)
+    def forward(self, x,mask = None):
+        q = self.to_q(x)
+        k = self.to_k(x)
+        v = self.to_v(x)
+        q = rearrange(q, 'b n (h d) -> b h n d', h=self.heads)
+        k = rearrange(k, 'b n (h d) -> b h n d', h=self.heads)
+        v = rearrange(v, 'b n (h d) -> b h n d', h=self.heads)
+        dots = torch.einsum('bhid,bhjd->bhij', q, k) * self.scale
+        attn = dots.softmax(dim=-1)
+        out = torch.einsum('bhij,bhjd->bhid', attn, v)
+        out = rearrange(out, 'b h n d -> b  n (h d)')
+        return out      
+
+
+class Rlocalformer(nn.Module):
+    def __init__(self, dim, heads,sh,sw,w):
+        super().__init__()
+        self.patch_size =1
+        self.sw=sw
+        self.sh=sh
+        self.w=w
+        self.attention =  LAttention(dim, heads=heads) 
+        self.pre_ViT=nn.Conv2d(in_channels=1024, out_channels=512, kernel_size=2,stride=1,padding="same")
+        self.mix=nn.ConvTranspose2d(in_channels=512, out_channels=1024, kernel_size=1, stride=1)
+    def forward(self, x,mask = None):
+        p = self.patch_size
+        x_1 = self.pre_ViT(x)
+        x_1 = rearrange(x_1, 'b c (sh h) (sw w) -> b (sh sw) c h w', sh=self.sh,sw=self.sw)
+        x_1 = rearrange(x_1, 'b s c (h p1) (w p2) -> b s (h w) (p1 p2 c)', p1=p, p2=p)
+        x_1 = self.attention(x_1,None)
+        x_1 = rearrange(x_1, 'b (sh sw) (h w) (p1 p2 c) -> b c (sh h p1) (sw w p2)', w=self.w//self.sw,c=512,p1=p ,p2=p,sh=self.sh,sw=self.sw)
+        x_1= self.mix(x_1)
+        x = x_1+x
+        return x
+
+class Rglobalformer(nn.Module):
+    def __init__(self, dim, heads,w):
+        super().__init__()
+        self.w=w
+        self.attention =  GAttention(dim, heads=heads)
+        self.conv=nn.Conv2d(in_channels=1024, out_channels=512, kernel_size=2, stride=1,padding="same")
+        self.mix= nn.ConvTranspose2d(in_channels=512, out_channels=1024, kernel_size=1, stride=1)
+    def forward(self, x,mask = None):
+        p = 1
+        z = self.conv(x)
+        z = rearrange(z, 'b c (h p1) (w p2) -> b (h w) (p1 p2 c)', p1=p, p2=p)
+        z = self.attention(z,None)
+        z = rearrange(z, 'b (h w) (p1 p2 c) -> b c (h p1) (w p2)', w=self.w,c=512,p1=p ,p2=p)
+        z = self.mix(z)
+        x = z+x
+        return x    
+        
+
+class ICMiF(nn.Module):
+    def __init__(self, w=8,dim=512, heads=8):
+        super().__init__()
+        self.patch_size = 1  # 32
+        self.transformer_1 = Rlocalformer(dim, heads,8,4,w)
+        self.transformer_2 = Rglobalformer(dim, heads,w)
+        self.transformer_3 = Rglobalformer(dim, heads,w)
+        self.transformer_4 = Rlocalformer(dim, heads,8,4,w)
+        self.transformer_5 = Rglobalformer(dim, heads,w)
+        self.transformer_6 = Rglobalformer(dim, heads,w)
+    def forward(self, x):
+        x_1 = self.transformer_1(x)
+        x_2 = self.transformer_2(x_1)
+        x_3 = self.transformer_3(x_2)
+        x_4 = self.transformer_4(x_3)
+        x_5 = self.transformer_5(x_4)
+        x_6 = self.transformer_6(x_5)
+        return x_6
 
 
 class ReIDBaseModel(nn.Module):
@@ -39,13 +153,15 @@ class ReIDBaseModel(nn.Module):
     ):
         super(ReIDBaseModel, self).__init__()
 
-        self.backbone = build_bakcbone(arch, pretrained=pretrained)
+        self.backbone=models.resnet50(pretrained=True)
+        self.backbone_head = nn.Sequential(*list(self.backbone.children())[0:7])
+        self.icmif=Transformer()
 
         self.global_pooling = build_pooling_layer(pooling)
         self.head = build_embedding_layer(
-            self.backbone.num_features, embed_feat, dropout
+            1024, 0, 0
         )
-        self.num_features = self.head.num_features
+        self.num_features = 1024
 
         self.num_classes = num_classes
         if self.num_classes > 0:
@@ -74,7 +190,8 @@ class ReIDBaseModel(nn.Module):
         batch_size = x.size(0)
         results = {}
 
-        x = self.backbone(x)
+        x = self.backbone_head(x)
+        x = icmif(x)
 
         out = self.global_pooling(x)
         out = out.view(batch_size, -1)
