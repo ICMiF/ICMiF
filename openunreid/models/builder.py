@@ -155,7 +155,7 @@ class ReIDBaseModel(nn.Module):
 
         self.backbone=models.resnet50(pretrained=True)
         self.backbone_head = nn.Sequential(*list(self.backbone.children())[0:7])
-        self.icmif=Transformer()
+        self.icmif=ICMiF()
 
         self.global_pooling = build_pooling_layer(pooling)
         self.head = build_embedding_layer(
