@@ -5,7 +5,7 @@ LOGS_ROOT: '../logs/'
 MODEL:
   # architecture
   backbone: 'resnet50'
-  pooling: 'gem'
+  pooling: 'avg'
   embed_feat: 0
   dropout: 0.
 
@@ -57,9 +57,9 @@ TRAIN:
   amp: False
 
   # datasets
-  datasets: {'market1501': 'trainval',}
-  # datasets: {'market1501': 'trainval', 'dukemtmcreid': 'trainval'}
-  unsup_dataset_indexes: [0,]
+  #datasets: {'market1501': 'trainval',}
+  datasets: {'market1501': 'trainval', 'dukemtmcreid': 'trainval'}
+  unsup_dataset_indexes: [1,]
 
   epochs: 50
   iters: 400
@@ -70,7 +70,7 @@ TRAIN:
     momentum: 0.2
 
   # validate
-  val_dataset: 'market1501'
+  val_dataset: 'dukemtmcreid'
   val_freq: 5
 
   # sampler
@@ -80,7 +80,7 @@ TRAIN:
 
   # data loader
   LOADER:
-    samples_per_gpu: 16
+    samples_per_gpu: 32
     workers_per_gpu: 2
 
   # pseudo labels
@@ -118,7 +118,7 @@ TRAIN:
 TEST:
 
   # datasets
-  datasets: ['market1501',]
+  datasets: ['market1501','dukemtmcreid']
 
   # data loader
   LOADER:
