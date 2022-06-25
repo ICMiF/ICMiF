@@ -52,7 +52,7 @@ DATA:
 
 TRAIN:
   seed: 5
-  deterministic: True
+  deterministic: False
   # mixed precision training for PyTorch>=1.6
   amp: False
 
